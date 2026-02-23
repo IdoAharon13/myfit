@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>myfit - אפליקציית כושר</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Scripts -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+</head>
+<body data-theme="light">
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <h1>myfit</h1>
+            </div>
+            <div class="controls">
+                <button id="themeToggle" class="btn" title="שנה מצב תצוגה">🌓</button>
+                <button id="viewToggle" class="btn" title="שנה פריסה">📱/💻</button>
+                <button id="historyBtn" class="btn" title="היסטוריה">🕒</button>
+            </div>
+        </header>
+
+        <nav class="trainee-tabs" id="traineeTabs">
+            <!-- Tabs will be injected here -->
+            <button id="addTraineeBtn" class="tab" style="border-style: dashed;">+ הוסף מתאמן</button>
+        </nav>
+
+        <section id="mainContent">
+            <div class="trainee-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                <h2 id="currentTraineeName" contenteditable="true">מתאמן</h2>
+                <div class="actions">
+                    <button id="addBlockBtn" class="btn btn-primary">+ הוסף אימון</button>
+                    <button id="importBtn" class="btn">📁 ייבוא קובץ</button>
+                    <button id="deleteTraineeBtn" class="btn btn-danger">מחק מתאמן</button>
+                    <input type="file" id="fileInput" class="hidden" accept=".txt,.csv,.xlsx,.docx">
+                </div>
+            </div>
+
+            <div id="blocksContainer" class="blocks-container grid">
+                <!-- Training blocks (tables) will be injected here -->
+            </div>
+        </section>
+    </div>
+
+    <!-- History Modal -->
+    <div id="historyModal" class="modal">
+        <div class="modal-content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h3>היסטוריית שינויים</h3>
+                <button id="closeHistory" class="btn">X</button>
+            </div>
+            <div id="historyList">
+                <!-- Logs will be injected here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

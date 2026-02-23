@@ -1,0 +1,363 @@
+// --- State Management ---
+let state = {
+    trainees: [],
+    currentTraineeIndex: 0,
+    viewMode: 'grid', // 'grid' | 'list'
+    theme: 'light',
+    history: []
+};
+
+const DEFAULT_TRAINEES = [
+    { name: 'עידו', blocks: [{ id: Date.now(), title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']] }] },
+    { name: 'יאיר', blocks: [{ id: Date.now() + 1, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']] }] }
+];
+
+// --- Initialization ---
+function init() {
+    const savedState = localStorage.getItem('myfit_state');
+    if (savedState) {
+        state = JSON.parse(savedState);
+    } else {
+        state.trainees = DEFAULT_TRAINEES;
+        saveState();
+    }
+
+    applyTheme();
+    renderTraineeTabs();
+    renderCurrentTrainee();
+    setupEventListeners();
+}
+
+function saveState() {
+    localStorage.setItem('myfit_state', JSON.stringify(state));
+}
+
+function logHistory(action, description) {
+    const trainee = state.trainees[state.currentTraineeIndex];
+    const entry = {
+        timestamp: new Date().toLocaleString('he-IL'),
+        traineeName: trainee ? trainee.name : 'מערכת',
+        action,
+        description
+    };
+    state.history.unshift(entry);
+    if (state.history.length > 100) state.history.pop();
+    saveState();
+}
+
+// --- UI Rendering ---
+function renderTraineeTabs() {
+    const tabsContainer = document.getElementById('traineeTabs');
+    // Remove existing tabs (except add button)
+    const existingTabs = tabsContainer.querySelectorAll('.tab:not(#addTraineeBtn)');
+    existingTabs.forEach(t => t.remove());
+
+    state.trainees.forEach((trainee, index) => {
+        const tab = document.createElement('button');
+        tab.className = `tab ${index === state.currentTraineeIndex ? 'active' : ''}`;
+        tab.textContent = trainee.name;
+        tab.onclick = () => switchTrainee(index);
+        tabsContainer.insertBefore(tab, document.getElementById('addTraineeBtn'));
+    });
+}
+
+function switchTrainee(index) {
+    state.currentTraineeIndex = index;
+    saveState();
+    renderTraineeTabs();
+    renderCurrentTrainee();
+}
+
+function renderCurrentTrainee() {
+    const trainee = state.trainees[state.currentTraineeIndex];
+    if (!trainee) return;
+
+    document.getElementById('currentTraineeName').textContent = trainee.name;
+    const blocksContainer = document.getElementById('blocksContainer');
+    blocksContainer.innerHTML = '';
+    blocksContainer.className = `blocks-container ${state.viewMode}`;
+
+    trainee.blocks.forEach((block, blockIndex) => {
+        const blockEl = createBlockElement(block, blockIndex);
+        blocksContainer.appendChild(blockEl);
+    });
+}
+
+function createBlockElement(block, blockIndex) {
+    const div = document.createElement('div');
+    div.className = 'block';
+    div.innerHTML = `
+    <div class="block-header">
+      <span class="block-title" contenteditable="true">${block.title}</span>
+      <div class="block-controls" style="display: flex; gap: 1rem;">
+        <button class="btn btn-sm move-up" title="הזז למעלה">↑</button>
+        <button class="btn btn-sm move-down" title="הזז למטה">↓</button>
+        <button class="btn btn-sm btn-danger delete-block" title="מחק אימון">🗑️</button>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table data-block-index="${blockIndex}">
+        <thead>
+          <tr>
+            ${block.data[0].map((h, i) => `<th contenteditable="true" data-col="${i}">${h}</th>`).join('')}
+            <th class="ctrl-col" style="width: 50px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${block.data.slice(1).map((row, r) => `
+            <tr>
+              ${row.map((cell, c) => `<td contenteditable="true" data-row="${r + 1}" data-col="${c}">${linkify(cell)}</td>`).join('')}
+              <td class="ctrl-col"><button class="btn btn-sm btn-danger delete-row" style="padding: 0.25rem 0.5rem;">🗑️</button></td>
+            </tr>
+          `).join('')}
+          <tr>
+            <td colspan="${block.data[0].length + 1}">
+              <div style="display: flex; gap: 1.5rem; margin-top: 1rem;">
+                <button class="btn btn-sm add-row">+ הוסף שורה</button>
+                <button class="btn btn-sm add-col">+ הוסף עמודה</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+
+    // Attach Listeners
+    const titleEl = div.querySelector('.block-title');
+    titleEl.onblur = (e) => {
+        const oldTitle = block.title;
+        block.title = e.target.textContent;
+        if (oldTitle !== block.title) {
+            logHistory('שינוי שם אימון', `מ-${oldTitle} ל-${block.title}`);
+            saveState();
+        }
+    };
+
+    div.querySelector('.delete-block').onclick = () => deleteBlock(blockIndex);
+    div.querySelector('.move-up').onclick = () => moveBlock(blockIndex, -1);
+    div.querySelector('.move-down').onclick = () => moveBlock(blockIndex, 1);
+    div.querySelector('.add-row').onclick = () => addRow(blockIndex);
+    div.querySelector('.add-col').onclick = () => addCol(blockIndex);
+
+    div.querySelectorAll('.delete-row').forEach((btn, r) => {
+        btn.onclick = () => deleteRow(blockIndex, r + 1);
+    });
+
+    div.querySelectorAll('td[contenteditable="true"], th[contenteditable="true"]').forEach(cell => {
+        cell.onblur = (e) => updateCell(blockIndex, e.target);
+    });
+
+    return div;
+}
+
+// --- Actions ---
+function updateCell(blockIndex, cellEl) {
+    const row = parseInt(cellEl.dataset.row) || 0;
+    const col = parseInt(cellEl.dataset.col);
+    const val = cellEl.textContent;
+    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+
+    if (block.data[row][col] !== val) {
+        block.data[row][col] = val;
+        cellEl.innerHTML = linkify(val);
+        logHistory('עדכון נתון', `באימון ${block.title}: שונה ל-"${val}"`);
+        saveState();
+    }
+}
+
+function addRow(blockIndex) {
+    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+    const newRow = new Array(block.data[0].length).fill('');
+    block.data.push(newRow);
+    logHistory('הוספת שורה', `באימון ${block.title}`);
+    saveState();
+    renderCurrentTrainee();
+}
+
+function deleteRow(blockIndex, rowIndex) {
+    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+    block.data.splice(rowIndex, 1);
+    logHistory('מחיקת שורה', `באימון ${block.title}`);
+    saveState();
+    renderCurrentTrainee();
+}
+
+function addCol(blockIndex) {
+    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+    block.data.forEach((row, i) => {
+        row.push(i === 0 ? 'עמודה חדשה' : '');
+    });
+    logHistory('הוספת עמודה', `באימון ${block.title}`);
+    saveState();
+    renderCurrentTrainee();
+}
+
+function deleteCol(blockIndex, colIndex) {
+    // Column deletion functionality removed as per user request
+    console.log("Column deletion is disabled.");
+}
+
+function deleteBlock(index) {
+    if (confirm('בטוח שברצונך למחוק אימון זה?')) {
+        const block = state.trainees[state.currentTraineeIndex].blocks[index];
+        state.trainees[state.currentTraineeIndex].blocks.splice(index, 1);
+        logHistory('מחיקת אימון', block.title);
+        saveState();
+        renderCurrentTrainee();
+    }
+}
+
+function moveBlock(index, direction) {
+    const blocks = state.trainees[state.currentTraineeIndex].blocks;
+    const newIndex = index + direction;
+    if (newIndex >= 0 && newIndex < blocks.length) {
+        [blocks[index], blocks[newIndex]] = [blocks[newIndex], blocks[index]];
+        logHistory('הזזת אימון', `מיקום שונה`);
+        saveState();
+        renderCurrentTrainee();
+    }
+}
+
+function linkify(text) {
+    const urlPattern = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    return text.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+}
+
+// --- Global Listeners ---
+function setupEventListeners() {
+    document.getElementById('themeToggle').onclick = () => {
+        state.theme = state.theme === 'light' ? 'dark' : 'light';
+        applyTheme();
+        saveState();
+    };
+
+    document.getElementById('viewToggle').onclick = () => {
+        state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid';
+        saveState();
+        renderCurrentTrainee();
+    };
+
+    document.getElementById('addTraineeBtn').onclick = () => {
+        const name = prompt('שם המתאמן החדש:');
+        if (name) {
+            state.trainees.push({ name, blocks: [] });
+            state.currentTraineeIndex = state.trainees.length - 1;
+            logHistory('הוספת מתאמן', name);
+            saveState();
+            renderTraineeTabs();
+            renderCurrentTrainee();
+        }
+    };
+
+    document.getElementById('deleteTraineeBtn').onclick = () => {
+        if (state.trainees.length <= 1) return alert('חייב להישאר לפחות מתאמן אחד');
+        if (confirm(`למחוק את ${state.trainees[state.currentTraineeIndex].name}?`)) {
+            const name = state.trainees[state.currentTraineeIndex].name;
+            state.trainees.splice(state.currentTraineeIndex, 1);
+            state.currentTraineeIndex = 0;
+            logHistory('מחיקת מתאמן', name);
+            saveState();
+            renderTraineeTabs();
+            renderCurrentTrainee();
+        }
+    };
+
+    document.getElementById('addBlockBtn').onclick = () => {
+        const title = prompt('שם האימון (למשל אימון A):', 'אימון חדש');
+        if (title) {
+            state.trainees[state.currentTraineeIndex].blocks.push({
+                id: Date.now(),
+                title,
+                data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']]
+            });
+            logHistory('הוספת אימון', title);
+            saveState();
+            renderCurrentTrainee();
+        }
+    };
+
+    document.getElementById('currentTraineeName').onblur = (e) => {
+        const oldName = state.trainees[state.currentTraineeIndex].name;
+        const newName = e.target.textContent;
+        if (oldName !== newName) {
+            state.trainees[state.currentTraineeIndex].name = newName;
+            logHistory('שינוי שם מתאמן', `מ-${oldName} ל-${newName}`);
+            saveState();
+            renderTraineeTabs();
+        }
+    };
+
+    document.getElementById('historyBtn').onclick = showHistory;
+    document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
+
+    // File Import Placeholder (Real parsing in next step)
+    document.getElementById('importBtn').onclick = () => document.getElementById('fileInput').click();
+    document.getElementById('fileInput').onchange = handleFileUpload;
+}
+
+function applyTheme() {
+    document.body.setAttribute('data-theme', state.theme);
+}
+
+function showHistory() {
+    const modal = document.getElementById('historyModal');
+    const list = document.getElementById('historyList');
+    list.innerHTML = state.history.map(h => `
+    <div style="border-bottom: 1px solid var(--border-color); padding: 0.5rem 0;">
+      <small>${h.timestamp} - <strong>${h.traineeName}</strong></small>
+      <div>${h.action}: ${h.description}</div>
+    </div>
+  `).join('') || 'אין עדיין היסטוריה';
+    modal.style.display = 'flex';
+}
+
+// File Upload Handler (Initial Version)
+async function handleFileUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (ext === 'csv' || ext === 'xlsx') {
+        reader.onload = (event) => {
+            const data = new Uint8Array(event.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+            importDataToBlock(file.name, jsonData);
+        };
+        reader.readAsArrayBuffer(file);
+    } else if (ext === 'docx') {
+        reader.onload = (event) => {
+            mammoth.convertToHtml({ arrayBuffer: event.target.result })
+                .then(res => {
+                    // Simplistic parsing of DOCX - convert table to array or text to blocks
+                    console.log(res.value);
+                    alert('ייבוא DOCX הושלם. בשדרוג הבא ייטען כטבלה מלאה.');
+                });
+        };
+        reader.readAsArrayBuffer(file);
+    } else if (ext === 'txt') {
+        reader.onload = (event) => {
+            const rows = event.target.result.split('\n').map(r => r.split(','));
+            importDataToBlock(file.name, rows);
+        };
+        reader.readAsText(file);
+    }
+}
+
+function importDataToBlock(title, data) {
+    state.trainees[state.currentTraineeIndex].blocks.push({
+        id: Date.now(),
+        title: `מיובא: ${title}`,
+        data: data.length ? data : [[''], ['']]
+    });
+    logHistory('ייבוא קובץ', title);
+    saveState();
+    renderCurrentTrainee();
+}
+
+// Start the app
+init();
