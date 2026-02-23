@@ -26,8 +26,12 @@ public class MyFitServer {
         ensureFileExists(PROGRAMS_FILE, "[]");
         ensureFileExists(HISTORY_FILE, "[]");
 
+        // Dynamic PORT from environment (for Render/Railway/etc)
+        String envPort = System.getenv("PORT");
+        int port = (envPort != null && !envPort.isEmpty()) ? Integer.parseInt(envPort) : PORT;
+
         // Binding to 0.0.0.0 to ensure it's reachable on all local interfaces
-        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", PORT), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
 
         server.createContext("/api/trainees", new TraineeHandler());
         server.createContext("/api/programs", new ProgramHandler());
@@ -36,7 +40,7 @@ public class MyFitServer {
 
         server.setExecutor(null);
         System.out.println("========================================");
-        System.out.println("SERVER RUNNING ON: http://localhost:" + PORT);
+        System.out.println("SERVER RUNNING ON PORT: " + port);
         System.out.println("DATA DIRECTORY: " + Paths.get(DATA_DIR).toAbsolutePath());
         System.out.println("========================================");
         System.out.println("Ready to receive requests...");

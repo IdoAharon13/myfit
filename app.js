@@ -1,5 +1,9 @@
 // --- API Configuration ---
-const API_BASE = 'http://localhost:8080/api';
+const LOCAL_API = 'http://localhost:8080/api';
+const PROD_API = 'https://myfit-api.onrender.com/api'; // החלף בכתובת השרת האמיתית לאחר פריסה
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? LOCAL_API
+    : PROD_API;
 
 const api = {
     async getTrainees() {
@@ -115,7 +119,15 @@ async function init() {
         console.log("How to run: cd backend && ./run.sh");
         console.groupEnd();
 
-        alert("שגיאה בהתחברות לשרת! \n1. וודא שחלון הטרמינל של השרת פתוח.\n2. בדוק שאין שגיאות בטרמינל.\n3. נסה לרענן את הדף.");
+        let errorMsg = "שגיאה בהתחברות לשרת!\n";
+        if (window.location.origin.includes("github.io")) {
+            errorMsg += "\nשים לב: אתה מנסה להריץ את האפליקציה דרך GitHub (HTTPS).\n" +
+                "הדפדפן חוסם חיבור לשרת מקומי מתוך אתר מאובטח.\n" +
+                "אנא פתח את הקובץ index.html ישירות מהתיקייה במחשב שלך.";
+        } else {
+            errorMsg += "\n1. וודא שחלון הטרמינל של השרת פתוח.\n2. בדוק שאין שגיאות בטרמינל.\n3. נסה לרענן את הדף.";
+        }
+        alert(errorMsg);
     }
 }
 
