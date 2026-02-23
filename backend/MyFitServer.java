@@ -32,6 +32,7 @@ public class MyFitServer {
         server.createContext("/api/trainees", new TraineeHandler());
         server.createContext("/api/programs", new ProgramHandler());
         server.createContext("/api/history", new HistoryHandler());
+        server.createContext("/api/ping", new PingHandler());
 
         server.setExecutor(null);
         System.out.println("========================================");
@@ -177,6 +178,18 @@ public class MyFitServer {
                 e.printStackTrace();
                 sendResponse(exchange, 500, "{\"error\":\"" + e.getMessage() + "\"}");
             }
+        }
+    }
+
+    static class PingHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            System.out.println("[Request] PING from " + exchange.getRemoteAddress());
+            if ("OPTIONS".equals(exchange.getRequestMethod())) {
+                handleOptions(exchange);
+                return;
+            }
+            sendResponse(exchange, 200, "PONG - MyFit Server is ALIVE!");
         }
     }
 

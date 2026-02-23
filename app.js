@@ -44,6 +44,11 @@ const api = {
             body: JSON.stringify(entry)
         });
         return res.json();
+    },
+    async ping() {
+        console.log("Checking server health at:", `${API_BASE}/ping`);
+        const res = await fetch(`${API_BASE}/ping`);
+        return res.text();
     }
 };
 
@@ -64,7 +69,12 @@ async function init() {
     console.log("Initializing myfit app with Java API...");
 
     try {
+        console.log("Step 1: Pinging server...");
+        const pingRes = await api.ping();
+        console.log("Server Health Check:", pingRes);
+
         // Load Data from Java API
+        console.log("Step 2: Fetching trainees...");
         state.trainees = await api.getTrainees();
         console.log(`Loaded ${state.trainees.length} trainees from API.`);
 
