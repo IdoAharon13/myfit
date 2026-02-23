@@ -22,18 +22,17 @@ async function init() {
         alert("שגיאה בחיבור למסד הנתונים. המידע עשוי שלא להישמר.");
     }
 
-    // Data will be loaded first, then settings validate against it.
-
-    // Load Data from IndexedDB
+    // Load Data from IndexedDB first
     state.trainees = await db.getAllTrainees();
+    console.log(`Loaded ${state.trainees.length} trainees.`);
 
     // Migration / Default Data
     if (state.trainees.length === 0) {
-        // Check if there's old localStorage data to migrate
+        // Check for old localStorage state migration
         const oldStateStr = localStorage.getItem('myfit_state');
         if (oldStateStr) {
             const oldState = JSON.parse(oldStateStr);
-            console.log("Migrating data from localStorage to IndexedDB...");
+            console.log("Migrating trainees from localStorage...");
             for (const t of oldState.trainees) {
                 const traineeId = await db.addTrainee({ name: t.name, createdAt: new Date() });
                 for (let i = 0; i < t.blocks.length; i++) {
@@ -41,16 +40,10 @@ async function init() {
                     await db.addBlock({ traineeId, title: b.title, data: b.data, order: i });
                 }
             }
-            // Migrate history too if needed
-            if (oldState.history) {
-                for (const h of oldState.history) {
-                    await db.addHistory({ ...h, traineeId: null }); // Trainee ID mapping is hard here, setting to null
-                }
-            }
             state.trainees = await db.getAllTrainees();
             localStorage.removeItem('myfit_state');
         } else {
-            // New User - Add Default Trainees
+            console.log("Adding default trainees...");
             const id1 = await db.addTrainee({ name: DEFAULT_TRAINEE_NAME_1, createdAt: new Date() });
             await db.addBlock({ traineeId: id1, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
 
@@ -61,21 +54,35 @@ async function init() {
         }
     }
 
-    // Load UI settings AFTER data is ready
+    // Load Settings from IndexedDB
+    let dbSettings = await db.getSettings();
+
+    // Migration for settings from localStorage
     const savedSettings = localStorage.getItem('myfit_settings');
-    if (savedSettings) {
+    if (savedSettings && !dbSettings) {
+        console.log("Migrating settings from localStorage...");
         try {
             const settings = JSON.parse(savedSettings);
-            state.viewMode = settings.viewMode || 'grid';
-            state.theme = settings.theme || 'light';
-            // Validate index
-            if (settings.currentTraineeIndex >= 0 && settings.currentTraineeIndex < state.trainees.length) {
-                state.currentTraineeIndex = settings.currentTraineeIndex;
-            } else {
-                state.currentTraineeIndex = 0;
-            }
+            dbSettings = {
+                viewMode: settings.viewMode || 'grid',
+                theme: settings.theme || 'light',
+                currentTraineeIndex: settings.currentTraineeIndex || 0
+            };
+            await db.saveSettings(dbSettings);
+            localStorage.removeItem('myfit_settings');
         } catch (e) {
-            console.error("Failed to parse settings:", e);
+            console.error("Failed to migrate settings:", e);
+        }
+    }
+
+    if (dbSettings) {
+        state.viewMode = dbSettings.viewMode || 'grid';
+        state.theme = dbSettings.theme || 'light';
+        // Validate index
+        if (dbSettings.currentTraineeIndex >= 0 && dbSettings.currentTraineeIndex < state.trainees.length) {
+            state.currentTraineeIndex = dbSettings.currentTraineeIndex;
+        } else {
+            state.currentTraineeIndex = 0;
         }
     }
 
@@ -85,20 +92,21 @@ async function init() {
     setupEventListeners();
 }
 
-function saveSettings() {
-    localStorage.setItem('myfit_settings', JSON.stringify({
+async function saveSettings() {
+    await db.saveSettings({
         viewMode: state.viewMode,
         theme: state.theme,
         currentTraineeIndex: state.currentTraineeIndex
-    }));
+    });
 }
 
 async function logHistory(action, description) {
     const trainee = state.trainees[state.currentTraineeIndex];
+    if (!trainee) return;
     const entry = {
         timestamp: new Date().toLocaleString('he-IL'),
-        traineeId: trainee ? trainee.id : null,
-        traineeName: trainee ? trainee.name : 'מערכת',
+        traineeId: trainee.id,
+        traineeName: trainee.name,
         action,
         description
     };
@@ -122,7 +130,7 @@ function renderTraineeTabs() {
 
 async function switchTrainee(index) {
     state.currentTraineeIndex = index;
-    saveSettings();
+    await saveSettings();
     renderTraineeTabs();
     await renderCurrentTrainee();
 }
@@ -283,16 +291,16 @@ function linkify(text) {
 
 // --- Global Listeners ---
 function setupEventListeners() {
-    document.getElementById('themeToggle').onclick = () => {
+    document.getElementById('themeToggle').onclick = async () => {
         state.theme = state.theme === 'light' ? 'dark' : 'light';
         applyTheme();
-        saveSettings();
+        await saveSettings();
     };
 
-    document.getElementById('viewToggle').onclick = () => {
+    document.getElementById('viewToggle').onclick = async () => {
         state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid';
-        saveSettings();
-        renderCurrentTrainee();
+        await saveSettings();
+        await renderCurrentTrainee();
     };
 
     document.getElementById('addTraineeBtn').onclick = async () => {
@@ -302,7 +310,7 @@ function setupEventListeners() {
             state.trainees = await db.getAllTrainees();
             state.currentTraineeIndex = state.trainees.findIndex(t => t.id === id);
             logHistory('הוספת מתאמן', name);
-            saveSettings();
+            await saveSettings();
             renderTraineeTabs();
             await renderCurrentTrainee();
         }
@@ -316,7 +324,7 @@ function setupEventListeners() {
             state.trainees = await db.getAllTrainees();
             state.currentTraineeIndex = 0;
             logHistory('מחיקת מתאמן', trainee.name);
-            saveSettings();
+            await saveSettings();
             renderTraineeTabs();
             await renderCurrentTrainee();
         }
@@ -365,10 +373,10 @@ async function showHistory() {
     const modal = document.getElementById('historyModal');
     const list = document.getElementById('historyList');
     const trainee = state.trainees[state.currentTraineeIndex];
+    if (!trainee) return;
 
-    // Get all history for current trainee
     const history = await db.getHistoryByTrainee(trainee.id);
-    history.sort((a, b) => b.id - a.id); // Newest first
+    history.sort((a, b) => b.id - a.id);
 
     list.innerHTML = history.map(h => `
     <div style="border-bottom: 1px solid var(--border-color); padding: 0.5rem 0; text-align: right;">
@@ -398,7 +406,6 @@ async function handleFileUpload(e) {
     } else if (ext === 'docx') {
         reader.onload = async (event) => {
             const result = await mammoth.convertToHtml({ arrayBuffer: event.target.result });
-            // Simplified: create a single cell with HTML content for now
             await importDataToBlock(file.name, [['תוכן מיובא מ-DOCX'], [result.value]]);
         };
         reader.readAsArrayBuffer(file);
