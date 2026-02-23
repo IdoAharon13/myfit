@@ -1,4 +1,6 @@
 #!/bin/bash
-echo "Starting MyFit Java API..."
+echo "Starting MyFit Standalone Java Server..."
 cd "$(dirname "$0")"
-mvn spring-boot:run
+mkdir -p data
+# Run the single-file Java source directly (supported in Java 11+)
+java MyFitServer.java
