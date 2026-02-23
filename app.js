@@ -1,54 +1,95 @@
+import { db } from './db.js';
+
 // --- State Management ---
 let state = {
     trainees: [],
     currentTraineeIndex: 0,
     viewMode: 'grid', // 'grid' | 'list'
-    theme: 'light',
-    history: []
+    theme: 'light'
 };
 
-const DEFAULT_TRAINEES = [
-    { name: 'עידו', blocks: [{ id: Date.now(), title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']] }] },
-    { name: 'יאיר', blocks: [{ id: Date.now() + 1, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']] }] }
-];
+const DEFAULT_TRAINEE_NAME_1 = 'עידו';
+const DEFAULT_TRAINEE_NAME_2 = 'יאיר';
 
 // --- Initialization ---
-function init() {
-    const savedState = localStorage.getItem('myfit_state');
-    if (savedState) {
-        state = JSON.parse(savedState);
-    } else {
-        state.trainees = DEFAULT_TRAINEES;
-        saveState();
+async function init() {
+    await db.init();
+
+    // Load UI settings from localStorage
+    const savedSettings = localStorage.getItem('myfit_settings');
+    if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        state.viewMode = settings.viewMode || 'grid';
+        state.theme = settings.theme || 'light';
+        state.currentTraineeIndex = settings.currentTraineeIndex || 0;
+    }
+
+    // Load Data from IndexedDB
+    state.trainees = await db.getAllTrainees();
+
+    // Migration / Default Data
+    if (state.trainees.length === 0) {
+        // Check if there's old localStorage data to migrate
+        const oldStateStr = localStorage.getItem('myfit_state');
+        if (oldStateStr) {
+            const oldState = JSON.parse(oldStateStr);
+            console.log("Migrating data from localStorage to IndexedDB...");
+            for (const t of oldState.trainees) {
+                const traineeId = await db.addTrainee({ name: t.name, createdAt: new Date() });
+                for (let i = 0; i < t.blocks.length; i++) {
+                    const b = t.blocks[i];
+                    await db.addBlock({ traineeId, title: b.title, data: b.data, order: i });
+                }
+            }
+            // Migrate history too if needed
+            if (oldState.history) {
+                for (const h of oldState.history) {
+                    await db.addHistory({ ...h, traineeId: null }); // Trainee ID mapping is hard here, setting to null
+                }
+            }
+            state.trainees = await db.getAllTrainees();
+            localStorage.removeItem('myfit_state');
+        } else {
+            // New User - Add Default Trainees
+            const id1 = await db.addTrainee({ name: DEFAULT_TRAINEE_NAME_1, createdAt: new Date() });
+            await db.addBlock({ traineeId: id1, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
+
+            const id2 = await db.addTrainee({ name: DEFAULT_TRAINEE_NAME_2, createdAt: new Date() });
+            await db.addBlock({ traineeId: id2, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
+
+            state.trainees = await db.getAllTrainees();
+        }
     }
 
     applyTheme();
     renderTraineeTabs();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
     setupEventListeners();
 }
 
-function saveState() {
-    localStorage.setItem('myfit_state', JSON.stringify(state));
+function saveSettings() {
+    localStorage.setItem('myfit_settings', JSON.stringify({
+        viewMode: state.viewMode,
+        theme: state.theme,
+        currentTraineeIndex: state.currentTraineeIndex
+    }));
 }
 
-function logHistory(action, description) {
+async function logHistory(action, description) {
     const trainee = state.trainees[state.currentTraineeIndex];
     const entry = {
         timestamp: new Date().toLocaleString('he-IL'),
+        traineeId: trainee ? trainee.id : null,
         traineeName: trainee ? trainee.name : 'מערכת',
         action,
         description
     };
-    state.history.unshift(entry);
-    if (state.history.length > 100) state.history.pop();
-    saveState();
+    await db.addHistory(entry);
 }
 
 // --- UI Rendering ---
 function renderTraineeTabs() {
     const tabsContainer = document.getElementById('traineeTabs');
-    // Remove existing tabs (except add button)
     const existingTabs = tabsContainer.querySelectorAll('.tab:not(#addTraineeBtn)');
     existingTabs.forEach(t => t.remove());
 
@@ -61,14 +102,14 @@ function renderTraineeTabs() {
     });
 }
 
-function switchTrainee(index) {
+async function switchTrainee(index) {
     state.currentTraineeIndex = index;
-    saveState();
+    saveSettings();
     renderTraineeTabs();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
 }
 
-function renderCurrentTrainee() {
+async function renderCurrentTrainee() {
     const trainee = state.trainees[state.currentTraineeIndex];
     if (!trainee) return;
 
@@ -77,13 +118,16 @@ function renderCurrentTrainee() {
     blocksContainer.innerHTML = '';
     blocksContainer.className = `blocks-container ${state.viewMode}`;
 
-    trainee.blocks.forEach((block, blockIndex) => {
-        const blockEl = createBlockElement(block, blockIndex);
+    const blocks = await db.getBlocksByTrainee(trainee.id);
+    blocks.sort((a, b) => a.order - b.order);
+
+    blocks.forEach((block, blockIndex) => {
+        const blockEl = createBlockElement(block, blockIndex, blocks);
         blocksContainer.appendChild(blockEl);
     });
 }
 
-function createBlockElement(block, blockIndex) {
+function createBlockElement(block, blockIndex, allBlocks) {
     const div = document.createElement('div');
     div.className = 'block';
     div.innerHTML = `
@@ -96,7 +140,7 @@ function createBlockElement(block, blockIndex) {
       </div>
     </div>
     <div class="table-wrapper">
-      <table data-block-index="${blockIndex}">
+      <table data-block-id="${block.id}">
         <thead>
           <tr>
             ${block.data[0].map((h, i) => `<th contenteditable="true" data-col="${i}">${h}</th>`).join('')}
@@ -123,99 +167,94 @@ function createBlockElement(block, blockIndex) {
     </div>
   `;
 
-    // Attach Listeners
+    // Listeners
     const titleEl = div.querySelector('.block-title');
-    titleEl.onblur = (e) => {
+    titleEl.onblur = async (e) => {
         const oldTitle = block.title;
         block.title = e.target.textContent;
         if (oldTitle !== block.title) {
+            await db.updateBlock(block);
             logHistory('שינוי שם אימון', `מ-${oldTitle} ל-${block.title}`);
-            saveState();
         }
     };
 
-    div.querySelector('.delete-block').onclick = () => deleteBlock(blockIndex);
-    div.querySelector('.move-up').onclick = () => moveBlock(blockIndex, -1);
-    div.querySelector('.move-down').onclick = () => moveBlock(blockIndex, 1);
-    div.querySelector('.add-row').onclick = () => addRow(blockIndex);
-    div.querySelector('.add-col').onclick = () => addCol(blockIndex);
+    div.querySelector('.delete-block').onclick = () => deleteBlock(block);
+    div.querySelector('.move-up').onclick = () => moveBlock(blockIndex, -1, allBlocks);
+    div.querySelector('.move-down').onclick = () => moveBlock(blockIndex, 1, allBlocks);
+    div.querySelector('.add-row').onclick = () => addRow(block);
+    div.querySelector('.add-col').onclick = () => addCol(block);
 
     div.querySelectorAll('.delete-row').forEach((btn, r) => {
-        btn.onclick = () => deleteRow(blockIndex, r + 1);
+        btn.onclick = () => deleteRow(block, r + 1);
     });
 
     div.querySelectorAll('td[contenteditable="true"], th[contenteditable="true"]').forEach(cell => {
-        cell.onblur = (e) => updateCell(blockIndex, e.target);
+        cell.onblur = (e) => updateCell(block, e.target);
     });
 
     return div;
 }
 
 // --- Actions ---
-function updateCell(blockIndex, cellEl) {
+async function updateCell(block, cellEl) {
     const row = parseInt(cellEl.dataset.row) || 0;
     const col = parseInt(cellEl.dataset.col);
     const val = cellEl.textContent;
-    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
 
     if (block.data[row][col] !== val) {
         block.data[row][col] = val;
+        await db.updateBlock(block);
         cellEl.innerHTML = linkify(val);
         logHistory('עדכון נתון', `באימון ${block.title}: שונה ל-"${val}"`);
-        saveState();
     }
 }
 
-function addRow(blockIndex) {
-    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+async function addRow(block) {
     const newRow = new Array(block.data[0].length).fill('');
     block.data.push(newRow);
+    await db.updateBlock(block);
     logHistory('הוספת שורה', `באימון ${block.title}`);
-    saveState();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
 }
 
-function deleteRow(blockIndex, rowIndex) {
-    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+async function deleteRow(block, rowIndex) {
     block.data.splice(rowIndex, 1);
+    await db.updateBlock(block);
     logHistory('מחיקת שורה', `באימון ${block.title}`);
-    saveState();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
 }
 
-function addCol(blockIndex) {
-    const block = state.trainees[state.currentTraineeIndex].blocks[blockIndex];
+async function addCol(block) {
     block.data.forEach((row, i) => {
         row.push(i === 0 ? 'עמודה חדשה' : '');
     });
+    await db.updateBlock(block);
     logHistory('הוספת עמודה', `באימון ${block.title}`);
-    saveState();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
 }
 
-function deleteCol(blockIndex, colIndex) {
-    // Column deletion functionality removed as per user request
-    console.log("Column deletion is disabled.");
-}
-
-function deleteBlock(index) {
+async function deleteBlock(block) {
     if (confirm('בטוח שברצונך למחוק אימון זה?')) {
-        const block = state.trainees[state.currentTraineeIndex].blocks[index];
-        state.trainees[state.currentTraineeIndex].blocks.splice(index, 1);
+        await db.deleteBlock(block.id);
         logHistory('מחיקת אימון', block.title);
-        saveState();
-        renderCurrentTrainee();
+        await renderCurrentTrainee();
     }
 }
 
-function moveBlock(index, direction) {
-    const blocks = state.trainees[state.currentTraineeIndex].blocks;
+async function moveBlock(index, direction, blocks) {
     const newIndex = index + direction;
     if (newIndex >= 0 && newIndex < blocks.length) {
-        [blocks[index], blocks[newIndex]] = [blocks[newIndex], blocks[index]];
+        const b1 = blocks[index];
+        const b2 = blocks[newIndex];
+        const tempOrder = b1.order;
+        b1.order = b2.order;
+        b2.order = tempOrder;
+
+        await db.updateBlock(b1);
+        await db.updateBlock(b2);
+
         logHistory('הזזת אימון', `מיקום שונה`);
-        saveState();
-        renderCurrentTrainee();
+        await renderCurrentTrainee();
     }
 }
 
@@ -229,61 +268,66 @@ function setupEventListeners() {
     document.getElementById('themeToggle').onclick = () => {
         state.theme = state.theme === 'light' ? 'dark' : 'light';
         applyTheme();
-        saveState();
+        saveSettings();
     };
 
     document.getElementById('viewToggle').onclick = () => {
         state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid';
-        saveState();
+        saveSettings();
         renderCurrentTrainee();
     };
 
-    document.getElementById('addTraineeBtn').onclick = () => {
+    document.getElementById('addTraineeBtn').onclick = async () => {
         const name = prompt('שם המתאמן החדש:');
         if (name) {
-            state.trainees.push({ name, blocks: [] });
-            state.currentTraineeIndex = state.trainees.length - 1;
+            const id = await db.addTrainee({ name, createdAt: new Date() });
+            state.trainees = await db.getAllTrainees();
+            state.currentTraineeIndex = state.trainees.findIndex(t => t.id === id);
             logHistory('הוספת מתאמן', name);
-            saveState();
+            saveSettings();
             renderTraineeTabs();
-            renderCurrentTrainee();
+            await renderCurrentTrainee();
         }
     };
 
-    document.getElementById('deleteTraineeBtn').onclick = () => {
+    document.getElementById('deleteTraineeBtn').onclick = async () => {
         if (state.trainees.length <= 1) return alert('חייב להישאר לפחות מתאמן אחד');
         if (confirm(`למחוק את ${state.trainees[state.currentTraineeIndex].name}?`)) {
-            const name = state.trainees[state.currentTraineeIndex].name;
-            state.trainees.splice(state.currentTraineeIndex, 1);
+            const trainee = state.trainees[state.currentTraineeIndex];
+            await db.deleteTrainee(trainee.id);
+            state.trainees = await db.getAllTrainees();
             state.currentTraineeIndex = 0;
-            logHistory('מחיקת מתאמן', name);
-            saveState();
+            logHistory('מחיקת מתאמן', trainee.name);
+            saveSettings();
             renderTraineeTabs();
-            renderCurrentTrainee();
+            await renderCurrentTrainee();
         }
     };
 
-    document.getElementById('addBlockBtn').onclick = () => {
+    document.getElementById('addBlockBtn').onclick = async () => {
+        const trainee = state.trainees[state.currentTraineeIndex];
         const title = prompt('שם האימון (למשל אימון A):', 'אימון חדש');
         if (title) {
-            state.trainees[state.currentTraineeIndex].blocks.push({
-                id: Date.now(),
+            const currentBlocks = await db.getBlocksByTrainee(trainee.id);
+            await db.addBlock({
+                traineeId: trainee.id,
                 title,
-                data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']]
+                data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']],
+                order: currentBlocks.length
             });
             logHistory('הוספת אימון', title);
-            saveState();
-            renderCurrentTrainee();
+            await renderCurrentTrainee();
         }
     };
 
-    document.getElementById('currentTraineeName').onblur = (e) => {
-        const oldName = state.trainees[state.currentTraineeIndex].name;
+    document.getElementById('currentTraineeName').onblur = async (e) => {
+        const trainee = state.trainees[state.currentTraineeIndex];
+        const oldName = trainee.name;
         const newName = e.target.textContent;
         if (oldName !== newName) {
-            state.trainees[state.currentTraineeIndex].name = newName;
+            trainee.name = newName;
+            await db.updateTrainee(trainee);
             logHistory('שינוי שם מתאמן', `מ-${oldName} ל-${newName}`);
-            saveState();
             renderTraineeTabs();
         }
     };
@@ -291,7 +335,6 @@ function setupEventListeners() {
     document.getElementById('historyBtn').onclick = showHistory;
     document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
 
-    // File Import Placeholder (Real parsing in next step)
     document.getElementById('importBtn').onclick = () => document.getElementById('fileInput').click();
     document.getElementById('fileInput').onchange = handleFileUpload;
 }
@@ -300,11 +343,17 @@ function applyTheme() {
     document.body.setAttribute('data-theme', state.theme);
 }
 
-function showHistory() {
+async function showHistory() {
     const modal = document.getElementById('historyModal');
     const list = document.getElementById('historyList');
-    list.innerHTML = state.history.map(h => `
-    <div style="border-bottom: 1px solid var(--border-color); padding: 0.5rem 0;">
+    const trainee = state.trainees[state.currentTraineeIndex];
+
+    // Get all history for current trainee
+    const history = await db.getHistoryByTrainee(trainee.id);
+    history.sort((a, b) => b.id - a.id); // Newest first
+
+    list.innerHTML = history.map(h => `
+    <div style="border-bottom: 1px solid var(--border-color); padding: 0.5rem 0; text-align: right;">
       <small>${h.timestamp} - <strong>${h.traineeName}</strong></small>
       <div>${h.action}: ${h.description}</div>
     </div>
@@ -312,51 +361,49 @@ function showHistory() {
     modal.style.display = 'flex';
 }
 
-// File Upload Handler (Initial Version)
 async function handleFileUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
     const ext = file.name.split('.').pop().toLowerCase();
+    const reader = new FileReader();
 
     if (ext === 'csv' || ext === 'xlsx') {
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             const data = new Uint8Array(event.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-            importDataToBlock(file.name, jsonData);
+            await importDataToBlock(file.name, jsonData);
         };
         reader.readAsArrayBuffer(file);
     } else if (ext === 'docx') {
-        reader.onload = (event) => {
-            mammoth.convertToHtml({ arrayBuffer: event.target.result })
-                .then(res => {
-                    // Simplistic parsing of DOCX - convert table to array or text to blocks
-                    console.log(res.value);
-                    alert('ייבוא DOCX הושלם. בשדרוג הבא ייטען כטבלה מלאה.');
-                });
+        reader.onload = async (event) => {
+            const result = await mammoth.convertToHtml({ arrayBuffer: event.target.result });
+            // Simplified: create a single cell with HTML content for now
+            await importDataToBlock(file.name, [['תוכן מיובא מ-DOCX'], [result.value]]);
         };
         reader.readAsArrayBuffer(file);
     } else if (ext === 'txt') {
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             const rows = event.target.result.split('\n').map(r => r.split(','));
-            importDataToBlock(file.name, rows);
+            await importDataToBlock(file.name, rows);
         };
         reader.readAsText(file);
     }
 }
 
-function importDataToBlock(title, data) {
-    state.trainees[state.currentTraineeIndex].blocks.push({
-        id: Date.now(),
+async function importDataToBlock(title, data) {
+    const trainee = state.trainees[state.currentTraineeIndex];
+    const currentBlocks = await db.getBlocksByTrainee(trainee.id);
+    await db.addBlock({
+        traineeId: trainee.id,
         title: `מיובא: ${title}`,
-        data: data.length ? data : [[''], ['']]
+        data: data.length ? data : [[''], ['']],
+        order: currentBlocks.length
     });
     logHistory('ייבוא קובץ', title);
-    saveState();
-    renderCurrentTrainee();
+    await renderCurrentTrainee();
 }
 
 // Start the app
