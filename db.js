@@ -1,7 +1,7 @@
 class MyFitDB {
     constructor() {
         this.dbName = 'MyFitDB';
-        this.version = 1;
+        this.version = 2; // Bumped version for new store
         this.db = null;
     }
 
@@ -21,6 +21,9 @@ class MyFitDB {
                 if (!db.objectStoreNames.contains('history')) {
                     const historyStore = db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
                     historyStore.createIndex('traineeId', 'traineeId', { unique: false });
+                }
+                if (!db.objectStoreNames.contains('settings')) {
+                    db.createObjectStore('settings', { keyPath: 'id' });
                 }
             };
 
@@ -46,7 +49,6 @@ class MyFitDB {
     }
 
     async deleteTrainee(id) {
-        // Also delete related blocks and history
         await this.deleteBlocksByTrainee(id);
         await this.deleteHistoryByTrainee(id);
         return this._delete('trainees', id);
@@ -90,6 +92,21 @@ class MyFitDB {
         }
     }
 
+    // --- Settings ---
+    async getSettings() {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction('settings', 'readonly');
+            const store = transaction.objectStore('settings');
+            const request = store.get('app_settings');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async saveSettings(settings) {
+        return this._update('settings', { id: 'app_settings', ...settings });
+    }
+
     // --- Private Helpers ---
     _getAll(storeName) {
         return new Promise((resolve, reject) => {
@@ -117,7 +134,7 @@ class MyFitDB {
             const transaction = this.db.transaction(storeName, 'readwrite');
             const store = transaction.objectStore(storeName);
             const request = store.add(item);
-            request.onsuccess = () => resolve(request.result); // Returns the new ID
+            request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
         });
     }

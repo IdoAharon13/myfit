@@ -13,16 +13,16 @@ const DEFAULT_TRAINEE_NAME_2 = 'יאיר';
 
 // --- Initialization ---
 async function init() {
-    await db.init();
-
-    // Load UI settings from localStorage
-    const savedSettings = localStorage.getItem('myfit_settings');
-    if (savedSettings) {
-        const settings = JSON.parse(savedSettings);
-        state.viewMode = settings.viewMode || 'grid';
-        state.theme = settings.theme || 'light';
-        state.currentTraineeIndex = settings.currentTraineeIndex || 0;
+    console.log("Initializing myfit app...");
+    try {
+        await db.init();
+        console.log("Database initialized.");
+    } catch (err) {
+        console.error("Failed to initialize database:", err);
+        alert("שגיאה בחיבור למסד הנתונים. המידע עשוי שלא להישמר.");
     }
+
+    // Data will be loaded first, then settings validate against it.
 
     // Load Data from IndexedDB
     state.trainees = await db.getAllTrainees();
@@ -58,6 +58,24 @@ async function init() {
             await db.addBlock({ traineeId: id2, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
 
             state.trainees = await db.getAllTrainees();
+        }
+    }
+
+    // Load UI settings AFTER data is ready
+    const savedSettings = localStorage.getItem('myfit_settings');
+    if (savedSettings) {
+        try {
+            const settings = JSON.parse(savedSettings);
+            state.viewMode = settings.viewMode || 'grid';
+            state.theme = settings.theme || 'light';
+            // Validate index
+            if (settings.currentTraineeIndex >= 0 && settings.currentTraineeIndex < state.trainees.length) {
+                state.currentTraineeIndex = settings.currentTraineeIndex;
+            } else {
+                state.currentTraineeIndex = 0;
+            }
+        } catch (e) {
+            console.error("Failed to parse settings:", e);
         }
     }
 
