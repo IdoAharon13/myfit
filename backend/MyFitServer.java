@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class MyFitServer {
@@ -20,26 +19,33 @@ public class MyFitServer {
     private static final String HISTORY_FILE = DATA_DIR + "/history.json";
 
     public static void main(String[] args) throws IOException {
+        System.out.println("Starting MyFit Standalone Server Setup...");
+
         Files.createDirectories(Paths.get(DATA_DIR));
         ensureFileExists(TRAINEES_FILE, "[]");
         ensureFileExists(PROGRAMS_FILE, "[]");
         ensureFileExists(HISTORY_FILE, "[]");
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        // Binding to 0.0.0.0 to ensure it's reachable on all local interfaces
+        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", PORT), 0);
 
         server.createContext("/api/trainees", new TraineeHandler());
         server.createContext("/api/programs", new ProgramHandler());
         server.createContext("/api/history", new HistoryHandler());
 
         server.setExecutor(null);
-        System.out.println("MyFit Standalone Server started on port " + PORT);
-        System.out.println("Press Ctrl+C to stop.");
+        System.out.println("========================================");
+        System.out.println("SERVER RUNNING ON: http://localhost:" + PORT);
+        System.out.println("DATA DIRECTORY: " + Paths.get(DATA_DIR).toAbsolutePath());
+        System.out.println("========================================");
+        System.out.println("Ready to receive requests...");
         server.start();
     }
 
     private static void ensureFileExists(String filePath, String content) throws IOException {
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
+            System.out.println("Creating data file: " + filePath);
             Files.write(path, content.getBytes(StandardCharsets.UTF_8));
         }
     }
@@ -51,6 +57,9 @@ public class MyFitServer {
     }
 
     private static void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
+        // Log outgoing response
+        System.out.println("  [Response] Status: " + statusCode + ", Length: " + response.length());
+
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -64,6 +73,7 @@ public class MyFitServer {
     }
 
     private static void handleOptions(HttpExchange exchange) throws IOException {
+        System.out.println("  [CORS] Handling OPTIONS request");
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
@@ -74,23 +84,29 @@ public class MyFitServer {
     static class TraineeHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            System.out.println("[Request] " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
             if ("OPTIONS".equals(exchange.getRequestMethod())) {
                 handleOptions(exchange);
                 return;
             }
 
-            if ("GET".equals(exchange.getRequestMethod())) {
-                String trainees = Files.readString(Paths.get(TRAINEES_FILE), StandardCharsets.UTF_8);
-                sendResponse(exchange, 200, trainees);
-            } else if ("POST".equals(exchange.getRequestMethod())) {
-                String body = getRequestBody(exchange);
-                String trainee = processJsonPost(TRAINEES_FILE, body);
-                sendResponse(exchange, 200, trainee);
-            } else if ("DELETE".equals(exchange.getRequestMethod())) {
-                String path = exchange.getRequestURI().getPath();
-                String id = path.substring(path.lastIndexOf("/") + 1);
-                deleteItem(TRAINEES_FILE, id);
-                sendResponse(exchange, 204, "");
+            try {
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    String trainees = Files.readString(Paths.get(TRAINEES_FILE), StandardCharsets.UTF_8);
+                    sendResponse(exchange, 200, trainees);
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    String body = getRequestBody(exchange);
+                    String trainee = processJsonPost(TRAINEES_FILE, body);
+                    sendResponse(exchange, 200, trainee);
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    String path = exchange.getRequestURI().getPath();
+                    String id = path.substring(path.lastIndexOf("/") + 1);
+                    deleteItem(TRAINEES_FILE, id);
+                    sendResponse(exchange, 204, "");
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                sendResponse(exchange, 500, "{\"error\":\"" + e.getMessage() + "\"}");
             }
         }
     }
@@ -98,32 +114,36 @@ public class MyFitServer {
     static class ProgramHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            System.out.println("[Request] " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
             if ("OPTIONS".equals(exchange.getRequestMethod())) {
                 handleOptions(exchange);
                 return;
             }
 
-            String path = exchange.getRequestURI().getPath();
-            if ("GET".equals(exchange.getRequestMethod())) {
-                // Support /api/programs/trainee/{id}
-                if (path.contains("/trainee/")) {
-                    String traineeId = path.substring(path.lastIndexOf("/") + 1);
-                    String allPrograms = Files.readString(Paths.get(PROGRAMS_FILE), StandardCharsets.UTF_8);
-                    // Minimal JSON filtering (not perfect but works for this scale)
-                    String filtered = filterJsonByField(allPrograms, "traineeId", traineeId);
-                    sendResponse(exchange, 200, filtered);
-                } else {
-                    String allPrograms = Files.readString(Paths.get(PROGRAMS_FILE), StandardCharsets.UTF_8);
-                    sendResponse(exchange, 200, allPrograms);
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    if (path.contains("/trainee/")) {
+                        String traineeId = path.substring(path.lastIndexOf("/") + 1);
+                        String allPrograms = Files.readString(Paths.get(PROGRAMS_FILE), StandardCharsets.UTF_8);
+                        String filtered = filterJsonByField(allPrograms, "traineeId", traineeId);
+                        sendResponse(exchange, 200, filtered);
+                    } else {
+                        String allPrograms = Files.readString(Paths.get(PROGRAMS_FILE), StandardCharsets.UTF_8);
+                        sendResponse(exchange, 200, allPrograms);
+                    }
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    String body = getRequestBody(exchange);
+                    String program = processJsonPost(PROGRAMS_FILE, body);
+                    sendResponse(exchange, 200, program);
+                } else if ("DELETE".equals(exchange.getRequestMethod())) {
+                    String id = path.substring(path.lastIndexOf("/") + 1);
+                    deleteItem(PROGRAMS_FILE, id);
+                    sendResponse(exchange, 204, "");
                 }
-            } else if ("POST".equals(exchange.getRequestMethod())) {
-                String body = getRequestBody(exchange);
-                String program = processJsonPost(PROGRAMS_FILE, body);
-                sendResponse(exchange, 200, program);
-            } else if ("DELETE".equals(exchange.getRequestMethod())) {
-                String id = path.substring(path.lastIndexOf("/") + 1);
-                deleteItem(PROGRAMS_FILE, id);
-                sendResponse(exchange, 204, "");
+            } catch (Exception e) {
+                e.printStackTrace();
+                sendResponse(exchange, 500, "{\"error\":\"" + e.getMessage() + "\"}");
             }
         }
     }
@@ -131,47 +151,47 @@ public class MyFitServer {
     static class HistoryHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
+            System.out.println("[Request] " + exchange.getRequestMethod() + " " + exchange.getRequestURI());
             if ("OPTIONS".equals(exchange.getRequestMethod())) {
                 handleOptions(exchange);
                 return;
             }
 
-            String path = exchange.getRequestURI().getPath();
-            if ("GET".equals(exchange.getRequestMethod())) {
-                String allHistory = Files.readString(Paths.get(HISTORY_FILE), StandardCharsets.UTF_8);
-                if (path.contains("/trainee/")) {
-                    String traineeId = path.substring(path.lastIndexOf("/") + 1);
-                    String filtered = filterJsonByField(allHistory, "traineeId", traineeId);
-                    sendResponse(exchange, 200, filtered);
-                } else {
-                    sendResponse(exchange, 200, allHistory);
+            try {
+                String path = exchange.getRequestURI().getPath();
+                if ("GET".equals(exchange.getRequestMethod())) {
+                    String allHistory = Files.readString(Paths.get(HISTORY_FILE), StandardCharsets.UTF_8);
+                    if (path.contains("/trainee/")) {
+                        String traineeId = path.substring(path.lastIndexOf("/") + 1);
+                        String filtered = filterJsonByField(allHistory, "traineeId", traineeId);
+                        sendResponse(exchange, 200, filtered);
+                    } else {
+                        sendResponse(exchange, 200, allHistory);
+                    }
+                } else if ("POST".equals(exchange.getRequestMethod())) {
+                    String body = getRequestBody(exchange);
+                    String entry = processJsonPost(HISTORY_FILE, body);
+                    sendResponse(exchange, 200, entry);
                 }
-            } else if ("POST".equals(exchange.getRequestMethod())) {
-                String body = getRequestBody(exchange);
-                String entry = processJsonPost(HISTORY_FILE, body);
-                sendResponse(exchange, 200, entry);
+            } catch (Exception e) {
+                e.printStackTrace();
+                sendResponse(exchange, 500, "{\"error\":\"" + e.getMessage() + "\"}");
             }
         }
     }
 
     // --- Minimal JSON Utils ---
 
-    // Simplistic POST handler: Adds ID if missing, or updates if ID exists.
     private static synchronized String processJsonPost(String fileName, String body) throws IOException {
-        String content = Files.readString(Paths.get(fileName), StandardCharsets.UTF_8);
-        content = content.trim();
+        String content = Files.readString(Paths.get(fileName), StandardCharsets.UTF_8).trim();
         if (content.isEmpty() || content.equals("[]")) {
             content = "[]";
         }
 
-        // Add auto-generated ID if not present
         if (!body.contains("\"id\"")) {
             String newId = String.valueOf(System.currentTimeMillis());
             body = body.substring(0, body.lastIndexOf("}")) + ",\"id\":" + newId + "}";
         } else {
-            // If it has an ID, we might need to update. For simplicity in this zero-dep
-            // server,
-            // we'll just remove the old one and add the new one.
             String idStr = extractId(body);
             deleteItem(fileName, idStr);
             content = Files.readString(Paths.get(fileName), StandardCharsets.UTF_8).trim();
@@ -189,8 +209,6 @@ public class MyFitServer {
 
     private static synchronized void deleteItem(String fileName, String id) throws IOException {
         String content = Files.readString(Paths.get(fileName), StandardCharsets.UTF_8);
-        // Extremely crude JSON removal - finds the object with "id":ID and removes it
-        // This is safe because our JSON is simple and flat per object.
         String idPattern = "\"id\":" + id;
         int idIdx = content.indexOf(idPattern);
         if (idIdx == -1)
@@ -202,7 +220,6 @@ public class MyFitServer {
         String before = content.substring(0, start);
         String after = content.substring(end);
 
-        // Clean up commas
         before = before.trim();
         after = after.trim();
         if (before.endsWith(",") && (after.isEmpty() || after.startsWith("]"))) {
@@ -217,7 +234,6 @@ public class MyFitServer {
     private static String filterJsonByField(String json, String field, String value) {
         if (json.equals("[]"))
             return "[]";
-        // Simple string matching for filtering
         String[] items = json.substring(1, json.length() - 1).split("(?<=\\}),(?=\\{)");
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;

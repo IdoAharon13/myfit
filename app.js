@@ -95,9 +95,17 @@ async function init() {
         renderTraineeTabs();
         await renderCurrentTrainee();
         setupEventListeners();
+        console.log("App initialized successfully.");
     } catch (err) {
-        console.error("Failed to connect to Java API:", err);
-        alert("לא ניתן להתחבר לשרת ה-Java. וודא שהשרת פועל בכתובת http://localhost:8080");
+        console.error("CRITICAL ERROR during initialization:", err);
+        console.group("Connection Diagnostics");
+        console.log("Target API Base:", API_BASE);
+        console.log("Current Page Origin:", window.location.origin);
+        console.log("Action Required: Make sure your Java server is running in a terminal!");
+        console.log("How to run: cd backend && ./run.sh");
+        console.groupEnd();
+
+        alert("שגיאה בהתחברות לשרת! \n1. וודא שחלון הטרמינל של השרת פתוח.\n2. בדוק שאין שגיאות בטרמינל.\n3. נסה לרענן את הדף.");
     }
 }
 
