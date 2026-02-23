@@ -274,6 +274,15 @@ h1 {
   text-align: right;
 }
 
+.history-title {
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+  color: var(--accent-color);
+  border-right: 5px solid var(--accent-color);
+  padding-right: 1rem;
+}
+
 /* Table */
 table {
   width: 100%;

@@ -1,11 +1,59 @@
-import { db } from './db.js';
+// --- API Configuration ---
+const API_BASE = 'http://localhost:8080/api';
+
+const api = {
+    async getTrainees() {
+        const res = await fetch(`${API_BASE}/trainees`);
+        return res.json();
+    },
+    async setTrainee(trainee) {
+        const res = await fetch(`${API_BASE}/trainees`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(trainee)
+        });
+        return res.json();
+    },
+    async deleteTrainee(id) {
+        await fetch(`${API_BASE}/trainees/${id}`, { method: 'DELETE' });
+    },
+    async getPrograms(traineeId) {
+        const res = await fetch(`${API_BASE}/programs/trainee/${traineeId}`);
+        return res.json();
+    },
+    async setProgram(program) {
+        const res = await fetch(`${API_BASE}/programs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(program)
+        });
+        return res.json();
+    },
+    async deleteProgram(id) {
+        await fetch(`${API_BASE}/programs/${id}`, { method: 'DELETE' });
+    },
+    async getHistory(traineeId) {
+        const url = traineeId ? `${API_BASE}/history/trainee/${traineeId}` : `${API_BASE}/history`;
+        const res = await fetch(url);
+        return res.json();
+    },
+    async setHistory(entry) {
+        const res = await fetch(`${API_BASE}/history`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(entry)
+        });
+        return res.json();
+    }
+};
 
 // --- State Management ---
 let state = {
     trainees: [],
     currentTraineeIndex: 0,
-    viewMode: 'grid', // 'grid' | 'list'
-    theme: 'light'
+    viewMode: 'grid',
+    theme: 'light',
+    activeTab: 'trainee' // 'trainee' | 'history'
 };
 
 const DEFAULT_TRAINEE_NAME_1 = 'עידו';
@@ -13,91 +61,52 @@ const DEFAULT_TRAINEE_NAME_2 = 'יאיר';
 
 // --- Initialization ---
 async function init() {
-    console.log("Initializing myfit app...");
+    console.log("Initializing myfit app with Java API...");
+
     try {
-        await db.init();
-        console.log("Database initialized.");
-    } catch (err) {
-        console.error("Failed to initialize database:", err);
-        alert("שגיאה בחיבור למסד הנתונים. המידע עשוי שלא להישמר.");
-    }
+        // Load Data from Java API
+        state.trainees = await api.getTrainees();
+        console.log(`Loaded ${state.trainees.length} trainees from API.`);
 
-    // Load Data from IndexedDB first
-    state.trainees = await db.getAllTrainees();
-    console.log(`Loaded ${state.trainees.length} trainees.`);
+        // Default Data if empty
+        if (state.trainees.length === 0) {
+            console.log("API empty, adding default trainees...");
+            const t1 = await api.setTrainee({ name: DEFAULT_TRAINEE_NAME_1 });
+            await api.setProgram({ traineeId: t1.id, title: 'אימון A', data: JSON.stringify([['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']]), orderIndex: 0 });
 
-    // Migration / Default Data
-    if (state.trainees.length === 0) {
-        // Check for old localStorage state migration
-        const oldStateStr = localStorage.getItem('myfit_state');
-        if (oldStateStr) {
-            const oldState = JSON.parse(oldStateStr);
-            console.log("Migrating trainees from localStorage...");
-            for (const t of oldState.trainees) {
-                const traineeId = await db.addTrainee({ name: t.name, createdAt: new Date() });
-                for (let i = 0; i < t.blocks.length; i++) {
-                    const b = t.blocks[i];
-                    await db.addBlock({ traineeId, title: b.title, data: b.data, order: i });
-                }
-            }
-            state.trainees = await db.getAllTrainees();
-            localStorage.removeItem('myfit_state');
-        } else {
-            console.log("Adding default trainees...");
-            const id1 = await db.addTrainee({ name: DEFAULT_TRAINEE_NAME_1, createdAt: new Date() });
-            await db.addBlock({ traineeId: id1, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
+            const t2 = await api.setTrainee({ name: DEFAULT_TRAINEE_NAME_2 });
+            await api.setProgram({ traineeId: t2.id, title: 'אימון A', data: JSON.stringify([['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']]), orderIndex: 0 });
 
-            const id2 = await db.addTrainee({ name: DEFAULT_TRAINEE_NAME_2, createdAt: new Date() });
-            await db.addBlock({ traineeId: id2, title: 'אימון A', data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']], order: 0 });
-
-            state.trainees = await db.getAllTrainees();
+            state.trainees = await api.getTrainees();
         }
-    }
 
-    // Load Settings from IndexedDB
-    let dbSettings = await db.getSettings();
-
-    // Migration for settings from localStorage
-    const savedSettings = localStorage.getItem('myfit_settings');
-    if (savedSettings && !dbSettings) {
-        console.log("Migrating settings from localStorage...");
-        try {
+        // Settings (Local storage is fine for UI preferences like theme, as per user's "users input" vs "ui settings" distinction, 
+        // but I'll move them to the browser's persistent state or just keep them for now. 
+        // The user specifically asked for "data users enter", "history", "trainee names", "training programs" in the DB.
+        const savedSettings = localStorage.getItem('myfit_settings');
+        if (savedSettings) {
             const settings = JSON.parse(savedSettings);
-            dbSettings = {
-                viewMode: settings.viewMode || 'grid',
-                theme: settings.theme || 'light',
-                currentTraineeIndex: settings.currentTraineeIndex || 0
-            };
-            await db.saveSettings(dbSettings);
-            localStorage.removeItem('myfit_settings');
-        } catch (e) {
-            console.error("Failed to migrate settings:", e);
+            state.viewMode = settings.viewMode || 'grid';
+            state.theme = settings.theme || 'light';
+            state.currentTraineeIndex = (settings.currentTraineeIndex < state.trainees.length) ? settings.currentTraineeIndex : 0;
         }
-    }
 
-    if (dbSettings) {
-        state.viewMode = dbSettings.viewMode || 'grid';
-        state.theme = dbSettings.theme || 'light';
-        // Validate index
-        if (dbSettings.currentTraineeIndex >= 0 && dbSettings.currentTraineeIndex < state.trainees.length) {
-            state.currentTraineeIndex = dbSettings.currentTraineeIndex;
-        } else {
-            state.currentTraineeIndex = 0;
-        }
+        applyTheme();
+        renderTraineeTabs();
+        await renderCurrentTrainee();
+        setupEventListeners();
+    } catch (err) {
+        console.error("Failed to connect to Java API:", err);
+        alert("לא ניתן להתחבר לשרת ה-Java. וודא שהשרת פועל בכתובת http://localhost:8080");
     }
-
-    applyTheme();
-    renderTraineeTabs();
-    await renderCurrentTrainee();
-    setupEventListeners();
 }
 
-async function saveSettings() {
-    await db.saveSettings({
+function saveSettings() {
+    localStorage.setItem('myfit_settings', JSON.stringify({
         viewMode: state.viewMode,
         theme: state.theme,
         currentTraineeIndex: state.currentTraineeIndex
-    });
+    }));
 }
 
 async function logHistory(action, description) {
@@ -110,29 +119,35 @@ async function logHistory(action, description) {
         action,
         description
     };
-    await db.addHistory(entry);
+    await api.setHistory(entry);
 }
 
 // --- UI Rendering ---
 function renderTraineeTabs() {
     const tabsContainer = document.getElementById('traineeTabs');
-    const existingTabs = tabsContainer.querySelectorAll('.tab:not(#addTraineeBtn)');
+    const existingTabs = tabsContainer.querySelectorAll('.tab:not(#addTraineeBtn):not(#historyTabBtn)');
     existingTabs.forEach(t => t.remove());
 
     state.trainees.forEach((trainee, index) => {
         const tab = document.createElement('button');
-        tab.className = `tab ${index === state.currentTraineeIndex ? 'active' : ''}`;
+        tab.className = `tab ${(state.activeTab === 'trainee' && index === state.currentTraineeIndex) ? 'active' : ''}`;
         tab.textContent = trainee.name;
         tab.onclick = () => switchTrainee(index);
-        tabsContainer.insertBefore(tab, document.getElementById('addTraineeBtn'));
+        tabsContainer.insertBefore(tab, document.getElementById('historyTabBtn'));
     });
+
+    document.getElementById('historyTabBtn').className = `tab ${state.activeTab === 'history' ? 'active' : ''}`;
 }
 
 async function switchTrainee(index) {
+    state.activeTab = 'trainee';
     state.currentTraineeIndex = index;
-    await saveSettings();
+    saveSettings();
     renderTraineeTabs();
     await renderCurrentTrainee();
+
+    document.getElementById('traineeSection').classList.remove('hidden');
+    document.getElementById('historySection').classList.add('hidden');
 }
 
 async function renderCurrentTrainee() {
@@ -144,11 +159,13 @@ async function renderCurrentTrainee() {
     blocksContainer.innerHTML = '';
     blocksContainer.className = `blocks-container ${state.viewMode}`;
 
-    const blocks = await db.getBlocksByTrainee(trainee.id);
-    blocks.sort((a, b) => a.order - b.order);
+    const programs = await api.getPrograms(trainee.id);
+    programs.sort((a, b) => a.orderIndex - b.orderIndex);
 
-    blocks.forEach((block, blockIndex) => {
-        const blockEl = createBlockElement(block, blockIndex, blocks);
+    programs.forEach((program, index) => {
+        // Parse the JSON data from Java
+        const dataArr = JSON.parse(program.data);
+        const blockEl = createBlockElement({ ...program, data: dataArr }, index, programs);
         blocksContainer.appendChild(blockEl);
     });
 }
@@ -166,7 +183,7 @@ function createBlockElement(block, blockIndex, allBlocks) {
       </div>
     </div>
     <div class="table-wrapper">
-      <table data-block-id="${block.id}">
+      <table>
         <thead>
           <tr>
             ${block.data[0].map((h, i) => `<th contenteditable="true" data-col="${i}">${h}</th>`).join('')}
@@ -199,7 +216,7 @@ function createBlockElement(block, blockIndex, allBlocks) {
         const oldTitle = block.title;
         block.title = e.target.textContent;
         if (oldTitle !== block.title) {
-            await db.updateBlock(block);
+            await api.setProgram({ ...block, data: JSON.stringify(block.data) });
             logHistory('שינוי שם אימון', `מ-${oldTitle} ל-${block.title}`);
         }
     };
@@ -229,7 +246,7 @@ async function updateCell(block, cellEl) {
 
     if (block.data[row][col] !== val) {
         block.data[row][col] = val;
-        await db.updateBlock(block);
+        await api.setProgram({ ...block, data: JSON.stringify(block.data) });
         cellEl.innerHTML = linkify(val);
         logHistory('עדכון נתון', `באימון ${block.title}: שונה ל-"${val}"`);
     }
@@ -238,14 +255,14 @@ async function updateCell(block, cellEl) {
 async function addRow(block) {
     const newRow = new Array(block.data[0].length).fill('');
     block.data.push(newRow);
-    await db.updateBlock(block);
+    await api.setProgram({ ...block, data: JSON.stringify(block.data) });
     logHistory('הוספת שורה', `באימון ${block.title}`);
     await renderCurrentTrainee();
 }
 
 async function deleteRow(block, rowIndex) {
     block.data.splice(rowIndex, 1);
-    await db.updateBlock(block);
+    await api.setProgram({ ...block, data: JSON.stringify(block.data) });
     logHistory('מחיקת שורה', `באימון ${block.title}`);
     await renderCurrentTrainee();
 }
@@ -254,14 +271,14 @@ async function addCol(block) {
     block.data.forEach((row, i) => {
         row.push(i === 0 ? 'עמודה חדשה' : '');
     });
-    await db.updateBlock(block);
+    await api.setProgram({ ...block, data: JSON.stringify(block.data) });
     logHistory('הוספת עמודה', `באימון ${block.title}`);
     await renderCurrentTrainee();
 }
 
 async function deleteBlock(block) {
     if (confirm('בטוח שברצונך למחוק אימון זה?')) {
-        await db.deleteBlock(block.id);
+        await api.deleteProgram(block.id);
         logHistory('מחיקת אימון', block.title);
         await renderCurrentTrainee();
     }
@@ -272,12 +289,12 @@ async function moveBlock(index, direction, blocks) {
     if (newIndex >= 0 && newIndex < blocks.length) {
         const b1 = blocks[index];
         const b2 = blocks[newIndex];
-        const tempOrder = b1.order;
-        b1.order = b2.order;
-        b2.order = tempOrder;
+        const tempOrder = b1.orderIndex;
+        b1.orderIndex = b2.orderIndex;
+        b2.orderIndex = tempOrder;
 
-        await db.updateBlock(b1);
-        await db.updateBlock(b2);
+        await api.setProgram({ ...b1, data: JSON.stringify(b1.data || JSON.parse(b1.data)) });
+        await api.setProgram({ ...b2, data: JSON.stringify(b2.data || JSON.parse(b2.data)) });
 
         logHistory('הזזת אימון', `מיקום שונה`);
         await renderCurrentTrainee();
@@ -291,28 +308,29 @@ function linkify(text) {
 
 // --- Global Listeners ---
 function setupEventListeners() {
-    document.getElementById('themeToggle').onclick = async () => {
+    document.getElementById('themeToggle').onclick = () => {
         state.theme = state.theme === 'light' ? 'dark' : 'light';
         applyTheme();
-        await saveSettings();
+        saveSettings();
     };
 
-    document.getElementById('viewToggle').onclick = async () => {
+    document.getElementById('viewToggle').onclick = () => {
         state.viewMode = state.viewMode === 'grid' ? 'list' : 'grid';
-        await saveSettings();
-        await renderCurrentTrainee();
+        saveSettings();
+        renderCurrentTrainee();
     };
+
+    document.getElementById('historyTabBtn').onclick = showHistoryTab;
 
     document.getElementById('addTraineeBtn').onclick = async () => {
         const name = prompt('שם המתאמן החדש:');
         if (name) {
-            const id = await db.addTrainee({ name, createdAt: new Date() });
-            state.trainees = await db.getAllTrainees();
-            state.currentTraineeIndex = state.trainees.findIndex(t => t.id === id);
+            const trainee = await api.setTrainee({ name });
+            state.trainees = await api.getTrainees();
+            state.currentTraineeIndex = state.trainees.findIndex(t => t.id === trainee.id);
             logHistory('הוספת מתאמן', name);
-            await saveSettings();
-            renderTraineeTabs();
-            await renderCurrentTrainee();
+            saveSettings();
+            await switchTrainee(state.currentTraineeIndex);
         }
     };
 
@@ -320,13 +338,12 @@ function setupEventListeners() {
         if (state.trainees.length <= 1) return alert('חייב להישאר לפחות מתאמן אחד');
         if (confirm(`למחוק את ${state.trainees[state.currentTraineeIndex].name}?`)) {
             const trainee = state.trainees[state.currentTraineeIndex];
-            await db.deleteTrainee(trainee.id);
-            state.trainees = await db.getAllTrainees();
+            await api.deleteTrainee(trainee.id);
+            state.trainees = await api.getTrainees();
             state.currentTraineeIndex = 0;
             logHistory('מחיקת מתאמן', trainee.name);
-            await saveSettings();
-            renderTraineeTabs();
-            await renderCurrentTrainee();
+            saveSettings();
+            await switchTrainee(0);
         }
     };
 
@@ -334,12 +351,12 @@ function setupEventListeners() {
         const trainee = state.trainees[state.currentTraineeIndex];
         const title = prompt('שם האימון (למשל אימון A):', 'אימון חדש');
         if (title) {
-            const currentBlocks = await db.getBlocksByTrainee(trainee.id);
-            await db.addBlock({
+            const currentPrograms = await api.getPrograms(trainee.id);
+            await api.setProgram({
                 traineeId: trainee.id,
                 title,
-                data: [['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']],
-                order: currentBlocks.length
+                data: JSON.stringify([['תרגיל', 'סטים', 'חזרות', 'משקל'], ['', '', '', '']]),
+                orderIndex: currentPrograms.length
             });
             logHistory('הוספת אימון', title);
             await renderCurrentTrainee();
@@ -352,14 +369,11 @@ function setupEventListeners() {
         const newName = e.target.textContent;
         if (oldName !== newName) {
             trainee.name = newName;
-            await db.updateTrainee(trainee);
+            await api.setTrainee(trainee);
             logHistory('שינוי שם מתאמן', `מ-${oldName} ל-${newName}`);
             renderTraineeTabs();
         }
     };
-
-    document.getElementById('historyBtn').onclick = showHistory;
-    document.getElementById('closeHistory').onclick = () => document.getElementById('historyModal').style.display = 'none';
 
     document.getElementById('importBtn').onclick = () => document.getElementById('fileInput').click();
     document.getElementById('fileInput').onchange = handleFileUpload;
@@ -369,22 +383,26 @@ function applyTheme() {
     document.body.setAttribute('data-theme', state.theme);
 }
 
-async function showHistory() {
-    const modal = document.getElementById('historyModal');
-    const list = document.getElementById('historyList');
-    const trainee = state.trainees[state.currentTraineeIndex];
-    if (!trainee) return;
+async function showHistoryTab() {
+    state.activeTab = 'history';
+    renderTraineeTabs();
 
-    const history = await db.getHistoryByTrainee(trainee.id);
+    document.getElementById('traineeSection').classList.add('hidden');
+    document.getElementById('historySection').classList.remove('hidden');
+
+    const list = document.getElementById('fullHistoryList');
+    const history = await api.getHistory();
     history.sort((a, b) => b.id - a.id);
 
     list.innerHTML = history.map(h => `
-    <div style="border-bottom: 1px solid var(--border-color); padding: 0.5rem 0; text-align: right;">
-      <small>${h.timestamp} - <strong>${h.traineeName}</strong></small>
-      <div>${h.action}: ${h.description}</div>
+    <div style="border-bottom: 1px solid var(--border-color); padding: 0.8rem 0; text-align: right;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <strong>${h.traineeName}</strong>
+        <small>${h.timestamp}</small>
+      </div>
+      <div style="margin-top: 0.3rem;">${h.action}: ${h.description}</div>
     </div>
-  `).join('') || 'אין עדיין היסטוריה';
-    modal.style.display = 'flex';
+  `).join('') || '<div style="text-align: center; padding: 2rem;">אין עדיין היסטוריה</div>';
 }
 
 async function handleFileUpload(e) {
@@ -420,12 +438,12 @@ async function handleFileUpload(e) {
 
 async function importDataToBlock(title, data) {
     const trainee = state.trainees[state.currentTraineeIndex];
-    const currentBlocks = await db.getBlocksByTrainee(trainee.id);
-    await db.addBlock({
+    const currentPrograms = await api.getPrograms(trainee.id);
+    await api.setProgram({
         traineeId: trainee.id,
         title: `מיובא: ${title}`,
-        data: data.length ? data : [[''], ['']],
-        order: currentBlocks.length
+        data: JSON.stringify(data.length ? data : [[''], ['']]),
+        orderIndex: currentPrograms.length
     });
     logHistory('ייבוא קובץ', title);
     await renderCurrentTrainee();

@@ -26,18 +26,17 @@
             <div class="controls">
                 <button id="themeToggle" class="btn" title="שנה מצב תצוגה">🌓</button>
                 <button id="viewToggle" class="btn" title="שנה פריסה">📱/💻</button>
-                <button id="historyBtn" class="btn" title="היסטוריה">🕒</button>
             </div>
         </header>
 
         <nav class="trainee-tabs" id="traineeTabs">
             <!-- Tabs will be injected here -->
+            <button id="historyTabBtn" class="tab">📋 היסטוריה</button>
             <button id="addTraineeBtn" class="tab" style="border-style: dashed;">+ הוסף מתאמן</button>
         </nav>
 
-        <section id="mainContent">
-            <div class="trainee-header"
-                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <section id="traineeSection">
+            <div class="trainee-header">
                 <h2 id="currentTraineeName" contenteditable="true">מתאמן</h2>
                 <div class="actions">
                     <button id="addBlockBtn" class="btn btn-primary">+ הוסף אימון</button>
@@ -51,20 +50,17 @@
                 <!-- Training blocks (tables) will be injected here -->
             </div>
         </section>
+
+        <section id="historySection" class="hidden">
+            <div class="trainee-header">
+                <h2>היסטוריית שינויים</h2>
+            </div>
+            <div id="fullHistoryList" class="block">
+                <!-- Full history list will be injected here -->
+            </div>
+        </section>
     </div>
 
-    <!-- History Modal -->
-    <div id="historyModal" class="modal">
-        <div class="modal-content">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                <h3>היסטוריית שינויים</h3>
-                <button id="closeHistory" class="btn">X</button>
-            </div>
-            <div id="historyList">
-                <!-- Logs will be injected here -->
-            </div>
-        </div>
-    </div>
 
 </body>
 
