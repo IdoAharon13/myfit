@@ -1,7 +1,5 @@
 package com.myfit.myfit_server.model;
 
-import java.time.LocalDateTime;
-
 public class History {
     private String id;
     private String traineeId;

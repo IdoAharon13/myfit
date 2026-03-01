@@ -1,7 +1,7 @@
 // --- API Configuration ---
 const LOCAL_API = 'http://localhost:8080/api';
 const PROD_API = 'https://myfit-api.onrender.com/api'; // החלף בכתובת השרת האמיתית לאחר פריסה
-const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === "")
     ? LOCAL_API
     : PROD_API;
 
