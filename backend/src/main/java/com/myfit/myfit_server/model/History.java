@@ -3,9 +3,10 @@ package com.myfit.myfit_server.model;
 public class History {
     private String id;
     private String traineeId;
-    private String date;
-    private String workoutType;
-    private String notes;
+    private String traineeName;
+    private String timestamp;
+    private String action;
+    private String description;
 
     // Getters and Setters
     public String getId() {
@@ -24,27 +25,35 @@ public class History {
         this.traineeId = traineeId;
     }
 
-    public String getDate() {
-        return date;
+    public String getTraineeName() {
+        return traineeName;
     }
 
-    public void setDate(String date) {
-        this.date = date;
+    public void setTraineeName(String traineeName) {
+        this.traineeName = traineeName;
     }
 
-    public String getWorkoutType() {
-        return workoutType;
+    public String getTimestamp() {
+        return timestamp;
     }
 
-    public void setWorkoutType(String workoutType) {
-        this.workoutType = workoutType;
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
     }
 
-    public String getNotes() {
-        return notes;
+    public String getAction() {
+        return action;
     }
 
-    public void setNotes(String notes) {
-        this.notes = notes;
+    public void setAction(String action) {
+        this.action = action;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 }

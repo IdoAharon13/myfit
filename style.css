@@ -167,6 +167,16 @@ h1 {
   border-color: var(--danger);
 }
 
+.btn-success {
+  background: var(--success);
+  color: white;
+  border: none;
+}
+
+.btn-success:hover {
+  filter: brightness(1.1);
+}
+
 /* Tabs */
 .tabs {
   display: flex;
