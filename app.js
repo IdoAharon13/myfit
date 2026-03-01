@@ -1,6 +1,9 @@
-const API_BASE = (window.location.protocol === 'file:' || window.location.hostname.includes("github.io"))
-    ? 'http://localhost:8080/api' // Fallback for local file testing or GitHub pages pointing to local
-    : '/api'; // Use relative path when served by the Spring Boot backend
+const PROD_API = 'https://myfit-backend.onrender.com/api';
+const LOCAL_API = 'http://localhost:8080/api';
+
+const API_BASE = (window.location.hostname.includes("github.io") || window.location.protocol === 'https:')
+    ? PROD_API
+    : (window.location.protocol === 'file:' ? LOCAL_API : '/api');
 
 const api = {
     async getTrainees() {
