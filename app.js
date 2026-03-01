@@ -175,13 +175,16 @@ function renderTraineeTabs() {
 }
 
 async function switchTrainee(index) {
-    if (state.dirtyTrainees.size > 0 || state.dirtyPrograms.size > 0) {
+    if (state.dirtyTrainees.size > 0 || state.dirtyPrograms.size > 0 ||
+        state.deletedTrainees.size > 0 || state.deletedPrograms.size > 0) {
         if (!confirm('ישנם שינויים שלא נשמרו. האם להמשיך ללא שמירה?')) {
             return;
         }
     }
     state.dirtyTrainees.clear();
     state.dirtyPrograms.clear();
+    state.deletedTrainees.clear();
+    state.deletedPrograms.clear();
 
     state.activeTab = 'trainee';
     state.currentTraineeIndex = index;
@@ -446,15 +449,78 @@ function setupEventListeners() {
     document.getElementById('saveBtn').onclick = async (e) => {
         const btn = e.currentTarget;
         const originalText = btn.innerHTML;
-        btn.innerHTML = '✅ נשמר!';
-        btn.classList.add('btn-success');
+        btn.innerHTML = '⏳ שומר...';
+        btn.disabled = true;
 
-        // Manual save trigger/visual feedback
-        await renderCurrentTrainee();
+        try {
+            // 1. Delete removed trainees
+            for (const id of state.deletedTrainees) {
+                await api.deleteTrainee(id);
+            }
+            state.deletedTrainees.clear();
+
+            // 2. Delete removed programs
+            for (const id of state.deletedPrograms) {
+                await api.deleteProgram(id);
+            }
+            state.deletedPrograms.clear();
+
+            // 3. Save dirty trainees (including new ones)
+            for (const t of state.trainees) {
+                if (state.dirtyTrainees.has(t.id)) {
+                    const payload = { ...t };
+                    const isNew = t.id.toString().startsWith('temp_');
+                    if (isNew) delete payload.id;
+                    const saved = await api.setTrainee(payload);
+
+                    if (isNew) {
+                        const oldId = t.id;
+                        t.id = saved.id;
+                        // Update traineeId in current programs if they belong to this new trainee
+                        state.currentPrograms.forEach(p => {
+                            if (p.traineeId === oldId) p.traineeId = t.id;
+                        });
+                    }
+                }
+            }
+            state.dirtyTrainees.clear();
+
+            // 4. Save dirty programs
+            for (const p of state.currentPrograms) {
+                if (state.dirtyPrograms.has(p.id)) {
+                    const payload = { ...p };
+                    const isNew = p.id.toString().startsWith('temp_');
+                    if (isNew) delete payload.id;
+                    payload.data = JSON.stringify(p.data);
+                    const saved = await api.setProgram(payload);
+                    p.id = saved.id;
+                }
+            }
+            state.dirtyPrograms.clear();
+
+            btn.innerHTML = '✅ נשמר!';
+            btn.classList.add('btn-success');
+
+            // Refresh state from API to ensure everything is in sync
+            state.trainees = await api.getTrainees();
+            const trainee = state.trainees[state.currentTraineeIndex];
+            if (trainee) {
+                state.currentPrograms = await api.getPrograms(trainee.id);
+                state.currentPrograms.sort((a, b) => a.orderIndex - b.orderIndex);
+            }
+
+            await renderCurrentTrainee();
+            renderTraineeTabs();
+        } catch (err) {
+            console.error("Error saving:", err);
+            btn.innerHTML = '❌ שגיאה!';
+            btn.classList.add('btn-danger');
+        }
 
         setTimeout(() => {
             btn.innerHTML = originalText;
-            btn.classList.remove('btn-success');
+            btn.classList.remove('btn-success', 'btn-danger');
+            btn.disabled = false;
         }, 2000);
     };
 }
@@ -518,14 +584,16 @@ async function handleFileUpload(e) {
 
 async function importDataToBlock(title, data) {
     const trainee = state.trainees[state.currentTraineeIndex];
-    const currentPrograms = await api.getPrograms(trainee.id);
-    await api.setProgram({
+    const newProgram = {
+        id: 'temp_' + Date.now(),
         traineeId: trainee.id,
         title: `מיובא: ${title}`,
-        data: JSON.stringify(data.length ? data : [[''], ['']]),
-        orderIndex: currentPrograms.length
-    });
-    logHistory('ייבוא קובץ', title);
+        data: data.length ? data : [[''], ['']],
+        orderIndex: state.currentPrograms.length
+    };
+    state.currentPrograms.push(newProgram);
+    state.dirtyPrograms.add(newProgram.id);
+    logHistory('ייבוא קובץ (ממתין לשמירה)', title);
     await renderCurrentTrainee();
 }
 
